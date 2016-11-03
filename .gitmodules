@@ -1,0 +1,3 @@
+[submodule "data"]
+	path = data_from_3rdparty/scir_training_day
+	url = https://github.com/HIT-SCIR/scir-training-day.git
