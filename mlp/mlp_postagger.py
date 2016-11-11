@@ -2,8 +2,13 @@
 # -*- coding:utf-8 -*-
 
 import sys
+import os
 import collections
 import random
+
+package_path = os.path.normpath(os.path.join(os.path.dirname(os.path.realpath(__file__)), ".."))
+sys.path.append(package_path)
+
 from dataset_handler.reader import ( read_training_data,
         read_devel_data,
         read_test_data )
@@ -19,28 +24,40 @@ class MlpData(object):
             self.pos = 0
             self.dataset = dataset
             self.rng = rng
-        
-        def get_instance_idx(self):
-            return self.instance_idx
 
-        def get_pos(self):
+        def get_current_pos(self):
             return self.pos
-
+        
         def get_current_instance(self):
-            return self.dataset[self.get_instance_idx()]
+            return self.dataset[self.instance_idx] # throw IndexError
 
         def move2next_instance(self):
             self.instance_idx += 1
             self.pos = 0
+            # to ensure the current(moved) instance is not empty!
+            # 1. check whether next instance exists
+            has_shuffled = False
+            if self.instance_idx >= len(self.dataset):
+                # shuffle again
+                self.rng.shuffle(self.dataset)
+                self.instance_idx = 0
+                has_shuffled = True
+            # 2. encure the current instance not empty.
+            while len(self.dataset[self.instance_idx]) == 0:
+                self.instance_idx += 1
+                if self.instance_idx >= len(self.dataset):
+                    if has_shuffled:
+                        raise Exception("dataset empty!")
+                    else:
+                        self.rng.shuffle(self.dataset)
+                        self.instance_idx = 0
+                        has_shuffled = True
         
         def move2next_pos(self):
             self.pos += 1
         
         def has_instance_end(self):
             return self.pos >= len(self.get_current_instance())
-
-        def has_dataset_end(self, dataset):
-            return self.instance_idx >= len(self.dataset)
 
         def reset(self):
             self.instance_idx = 0
@@ -53,7 +70,6 @@ class MlpData(object):
         self.raw_training_data = read_training_data()
         self.raw_devel_data = read_devel_data()
         self.raw_test_data = read_test_data()
-        self.batch_read_state = BatchReadState()
         self.rng = random.Random(RandomSeed)
         self.unkreplace_cnt = unkreplace_cnt_threshold
         self.unkreplace_prob = unkreplace_prob_threshold
@@ -82,14 +98,14 @@ class MlpData(object):
         self.sos_str = "<SOS>"
         self.sos_idx = len(self.idx2word)
         self.word2idx[self.sos_str] = self.sos_idx
-        sel.idx2word.append(self.sos_str)
+        self.idx2word.append(self.sos_str)
         self.counter.append(self.unkreplace_cnt + 1)
         
         self.eos_str = "<EOS>"
-        self.eos_idx = len(slf.idx2word)
+        self.eos_idx = len(self.idx2word)
         self.word2idx[self.eos_str] = self.eos_idx
         self.idx2word.append(self.eos_str)
-        self.counter.append(unkreplace_cnt)
+        self.counter.append(self.unkreplace_cnt + 1)
         
         self.worddict_sz = len(self.idx2word)
 
@@ -110,7 +126,7 @@ class MlpData(object):
         '''
         idx_dataset = []
         for word_list, tag_list in dataset:
-            word_idx_list = [ self.word2idx[word] for word in word_list ]
+            word_idx_list = [ self.word2idx[word] if word in self.word2idx else self.unk_idx for word in word_list ]
             tag_idx_list = [ self.tag2idx[tag] for tag in tag_list ]
             idx_dataset.append( (word_idx_list, tag_idx_list) )
         return idx_dataset
@@ -120,11 +136,13 @@ class MlpData(object):
         '''
         idx_dataset = []
         for word_list in dataset:
-            word_idx_list = [ self.word2idx[word] for word in word_list ]
+            word_idx_list = [ self.word2idx[word] if word in self.word2idx else self.unk_idx for word in word_list ]
             idx_dataset.append(word_idx_list)
         return idx_dataset
 
     def build_training_data(self):
+        self.build_worddict()
+        self.build_tagdict()
         self.shuffled_training_data = self._translate_annotated_data(self.raw_training_data)
 
     def build_devel_data(self):
@@ -133,6 +151,15 @@ class MlpData(object):
     def build_test_data(self):
         self.test_data = self._translate_unannotated_data(self.raw_test_data)
     
+    def build_batch_read_state(self):
+        self.batch_read_state = self.BatchReadState(self.shuffled_training_data, self.rng)
+
+    def build_all_data(self):
+        self.build_training_data()
+        self.build_devel_data()
+        self.build_test_data()
+        self.build_batch_read_state()
+
     def _replace_wordidx2unk(self, wordidx):
         ''' replace word to unk. 
         using the strategy: word_cnt <= replace_cnt && random() <= replace_prob.
@@ -144,31 +171,20 @@ class MlpData(object):
             else:
                 return wordidx
         except IndexError:
-            print("invalid word index:{} (word dict size: {}). using <unk> replace.".format(wordidx, self.worddict_sz),
-                   file=sys.stderr)
+            print("invalid word index:{} (word dict size: {}). using <unk> replace.".format(wordidx, self.worddict_sz),file=sys.stderr)
             return self.unk_idx
     
-    def 
-
-    def _init_window_queue_in_current_state(self, window_queue):
+    def _init_window_queue_in_current_state(self, window_queue, x_list, pos):
         half_sz = self.window_sz // 2
-        instance_x = self.shuffled_training_data[self.batch_read_state.get_instance_idx()][0]
-        while self.batch_read_state.has_instance_end(instance): # may have continues empty instance
-            self.batch_raed_state.move2next_instance()
-            if self.batch_read_state.has_dataset_end():
-                self.batch_read_state.reset()
-                self.rng.shuffle(self.shuffled_training_data)
-            instance_x = self.shuffled_training_data[self.batch_read_state.get_instance_idx()][0]
-        pos = self.batch_read_state.get_pos()
         # left
         for i in range(half_sz, 0, -1):
-            wordidx = instance_x[pos - i] if pos - i >= 0 else self.sos_idx
+            wordidx = x_list[pos - i] if pos - i >= 0 else self.sos_idx
             window_queue.append(wordidx)
         # center
-        window_queue.append(instance[pos])
+        window_queue.append(x_list[pos])
         # right
         for i in range(1, half_sz + 1):
-            wordidx = instance_x[pos + i] is pos + i < len(instance) else self.eos_idx
+            wordidx = x_list[pos + i] if pos + i < len(x_list) else self.eos_idx
             window_queue.append(wordidx)
 
     def get_mlp_next_batch_training_data(self):
@@ -176,30 +192,48 @@ class MlpData(object):
         Y = []
         state = self.batch_read_state
         window_queue = collections.deque(maxlen=self.window_sz)
-        half_sz = window_sz // 2
+        half_sz = self.window_sz // 2
+        # check instance state
+        if state.has_instance_end():
+            state.move2next_instance()
+        original_instance = state.get_current_instance()
+        generate_unkreplaced_x = lambda ox: [ self._replace_wordidx2unk(wordidx) for wordidx in ox  ]
+        x_list = generate_unkreplaced_x(original_instance[0])
+        y_list = original_instance[1]
         # init the queue
-        self._init_window_queue_in_current_state(window_queue)
-        instance = self.shuffled_training_data[state.get_instance_idx()]
+        self._init_window_queue_in_current_state(window_queue, x_list, state.get_current_pos())
         X.append(list(window_queue))
-        Y.append(instance[1][state.get_pos()])
-        # processing continues 
-        for i in range(1, self.batch_sz):
+        Y.append(y_list[state.get_current_pos()])
+        # continues
+        instance_cnt = 1
+        while instance_cnt < self.batch_sz:
             state.move2next_pos()
-            while self.batch_read_state.has_instance_end(instance) :
+            if state.has_instance_end():
+                # update x_list, y_list
                 state.move2next_instance()
-                if self.batch_read_state.has_dataset_end():
-                    # shuffle dataset again and rest batch read state
-                    state.reset()
-                    self.rng.shuffle(self.shuffled_training_data)
-                instance = self.shuffled_training_data[state.get_instance_idx()]
-            coming_wordidx = (instance[0][state.get_pos() + half_sz] if state.get_pos() + half_sz < len(instance) 
-                                                                  else self.eos_idx)
-            window_queue.append(coming_wordidx)
+                original_instance = state.get_current_instance()
+                x_list = generate_unkreplaced_x(original_instance[0])
+                y_list = original_instance[1]
+                # re-init the window queue
+                self._init_window_queue_in_current_state(window_queue, x_list, state.get_current_pos())
+                X.append(list(window_queue))
+                Y.append(y_list[state.get_current_pos()])
+                instance_cnt += 1
+                if instance_cnt < self.batch_sz:
+                    break
+                state.move2next_pos() # need move to next pos
+            pos = state.get_current_pos()
+            # push the comming word index to window queue
+            window_queue.append( x_list[pos + half_sz] if pos + half_sz < len(x_list) else self.eos_idx )
             X.append(list(window_queue))
-            Y.append(instance[1][state.get_pos()])
-        state.move2next_pos() # for next batch read.
+            Y.append(y_list[pos])
+            instance_cnt += 1
+        state.move2next_pos() # for next batch generate.
         return X, Y
 
-
-
-
+if __name__ == "__main__":
+    mlp_data = MlpData(window_sz=3, batch_sz=10)
+    mlp_data.build_all_data()
+    X, Y = mlp_data.get_mlp_next_batch_training_data()
+    for x, y in zip(X, Y):
+        print(x, y)
