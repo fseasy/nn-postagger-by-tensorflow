@@ -12,7 +12,9 @@ from mlp_data import MlpData
 
 def MlpNet(object):
 
-
-    def build_net(self)
+    def build_net(self):
+        self.graph = g = tf.Graph()
+        with g.as_default(), tf.device("/cpu:0"):
+            batch_x_input = tf.placfeholder()
 
 
