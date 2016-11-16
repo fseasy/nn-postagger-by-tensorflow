@@ -25,8 +25,8 @@ class MlpData(object):
             self.instance_idx = 0
             self.pos = 0
             self.dataset = dataset
-            self.rng = rng
-            self._nr_shuffled_time = 1
+            self._rng = rng
+            self._nr_shuffled_time = 0
         
         @property
         def nr_shuffled_time(self):
@@ -39,7 +39,7 @@ class MlpData(object):
             return self.dataset[self.instance_idx] # throw IndexError
         
         def _do_shuffle_transaction(self):
-            self.rng.shuffle(self.dataset)
+            self._rng.shuffle(self.dataset)
             self.instance_idx = 0
             self._nr_shuffled_time += 1
 
@@ -75,11 +75,11 @@ class MlpData(object):
     
     def __init__(self, window_sz=5, batch_sz=128, 
                  unkreplace_cnt_threshold=1, unkreplace_prob_threshold=0.2, loglevel=logging.INFO):
-        self.window_sz = window_sz
-        self.batch_sz = batch_sz
-        self.rng = random.Random(RandomSeed)
-        self.unkreplace_cnt = unkreplace_cnt_threshold
-        self.unkreplace_prob = unkreplace_prob_threshold
+        self._window_sz = window_sz
+        self._batch_sz = batch_sz
+        self._rng = random.Random(RandomSeed)
+        self._unkreplace_cnt = unkreplace_cnt_threshold
+        self._unkreplace_prob = unkreplace_prob_threshold
         self._build_all_data()
         logging.getLogger(__name__).setLevel(loglevel)
 
@@ -103,21 +103,21 @@ class MlpData(object):
         self.unk_idx = len(self.idx2word)
         self.word2idx[self.unk_str] = self.unk_idx
         self.idx2word.append(self.unk_str)
-        self.counter.append(self.unkreplace_cnt + 1) # hack, aoivd unk replace 
+        self.counter.append(self._unkreplace_cnt + 1) # hack, aoivd unk replace 
 
         self.sos_str = "<SOS>"
         self.sos_idx = len(self.idx2word)
         self.word2idx[self.sos_str] = self.sos_idx
         self.idx2word.append(self.sos_str)
-        self.counter.append(self.unkreplace_cnt + 1)
+        self.counter.append(self._unkreplace_cnt + 1)
         
         self.eos_str = "<EOS>"
         self.eos_idx = len(self.idx2word)
         self.word2idx[self.eos_str] = self.eos_idx
         self.idx2word.append(self.eos_str)
-        self.counter.append(self.unkreplace_cnt + 1)
+        self.counter.append(self._unkreplace_cnt + 1)
         
-        self.worddict_sz = len(self.idx2word)
+        self._worddict_sz = len(self.idx2word)
         print("+ word dict info: dict size({}) sos_idx({}) eos_idx({}) unk_idx({})".format(
               self.worddict_sz, self.sos_idx, self.eos_idx, self.unk_idx))
 
@@ -133,7 +133,7 @@ class MlpData(object):
         for tag in tag_set:
             self.tag2idx[tag] = len(self.idx2tag)
             self.idx2tag.append(tag)
-        self.tagdict_sz = len(self.idx2tag)
+        self._tagdict_sz = len(self.idx2tag)
         print("+ tag dict info: dict size({})".format(self.tagdict_sz))
     
     def _translate_annotated_data(self, dataset):
@@ -171,7 +171,7 @@ class MlpData(object):
         logging.getLogger(__name__).info("done.")
     
     def _build_batch_read_state(self):
-        self.batch_read_state = self.BatchReadState(self.shuffled_training_data, self.rng)
+        self.batch_read_state = self.BatchReadState(self.shuffled_training_data, self._rng)
 
     def _build_all_data(self):
         
@@ -192,8 +192,8 @@ class MlpData(object):
         using the strategy: word_cnt <= replace_cnt && random() <= replace_prob.
         '''
         try:
-            if ( self.counter[wordidx] <= self.unkreplace_cnt 
-                 and self.rng.random() < self.unkreplace_prob) :
+            if ( self.counter[wordidx] <= self._unkreplace_cnt 
+                 and self._rng.random() < self._unkreplace_prob) :
                 return self.unk_idx
             else:
                 return wordidx
@@ -202,7 +202,7 @@ class MlpData(object):
             return self.unk_idx
     
     def _init_window_queue_in_current_state(self, window_queue, x_list, pos):
-        half_sz = self.window_sz // 2
+        half_sz = self._window_sz // 2
         # left
         for i in range(half_sz, 0, -1):
             wordidx = x_list[pos - i] if pos - i >= 0 else self.sos_idx
@@ -234,8 +234,8 @@ class MlpData(object):
         X = []
         Y = []
         state = self.batch_read_state
-        window_queue = collections.deque(maxlen=self.window_sz)
-        half_sz = self.window_sz // 2
+        window_queue = collections.deque(maxlen=self._window_sz)
+        half_sz = self._window_sz // 2
         # check instance state
         if state.has_instance_end():
             state.move2next_instance()
@@ -249,7 +249,7 @@ class MlpData(object):
         Y.append(y_list[state.get_current_pos()])
         # continues
         instance_cnt = 1
-        while instance_cnt < self.batch_sz:
+        while instance_cnt < self._batch_sz:
             state.move2next_pos()
             if state.has_instance_end():
                 # update x_list, y_list
@@ -262,7 +262,7 @@ class MlpData(object):
                 X.append(list(window_queue))
                 Y.append(y_list[state.get_current_pos()])
                 instance_cnt += 1
-                if instance_cnt >= self.batch_sz:
+                if instance_cnt >= self._batch_sz:
                     break
                 state.move2next_pos() # need move to next pos
             pos = state.get_current_pos()
@@ -290,8 +290,8 @@ class MlpData(object):
         '''
         X = []
         Y = []
-        window_queue = collections.deque(maxlen=self.window_sz)
-        half_sz = self.window_sz // 2
+        window_queue = collections.deque(maxlen=self._window_sz)
+        half_sz = self._window_sz // 2
         for (x_list, y_list) in self.devel_data:
             # processing X
             window_list = []
@@ -322,8 +322,8 @@ class MlpData(object):
                     ]
         '''
         X = []
-        window_queue = collections.deque(maxlen=self.window_sz)
-        half_sz = self.window_sz // 2
+        window_queue = collections.deque(maxlen=self._window_sz)
+        half_sz = self._window_sz // 2
         for x_list in self.test_data:
             window_list = []
             # 1. init the window deque
@@ -339,14 +339,25 @@ class MlpData(object):
                 window_list.append(list(window_queue))
             X.append(window_list)
         return X
-
-    def get_worddict_sz(self):
-        return self.worddict_sz
     
-    def get_tagdict_sz(self):
-        return self.tagdict_sz
-
-    def get_iterate_time(self):
+    @property
+    def window_sz(self):
+        return self._window_sz
+    
+    @property
+    def batch_sz(self):
+        return self._batch_sz
+    
+    @property
+    def worddict_sz(self):
+        return self._worddict_sz
+    
+    @property
+    def tagdict_sz(self):
+        return self._tagdict_sz
+    
+    @property
+    def iterate_time(self):
         '''
         count +1 when training data has been read once.
         '''
@@ -373,7 +384,7 @@ def test():
     print("devel data has instance cnt: {}".format(len(devel_data[0])))
     test_data = mlp_data.get_mlp_test_data()
     print("test data has instance cnt: " , len(test_data))
-    print("shuffled_time: ", mlp_data.get_iterate_time())
+    print("shuffled_time: ", mlp_data.iterate_time())
 
 if __name__ == "__main__":
     test()
