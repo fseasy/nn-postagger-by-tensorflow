@@ -251,7 +251,7 @@ class MlpData(object):
         instance_cnt = 1
         while instance_cnt < self._batch_sz:
             state.move2next_pos()
-            if state.has_instance_end():
+            while state.has_instance_end(): # there exits sentence with only 1 token 
                 # update x_list, y_list
                 state.move2next_instance()
                 original_instance = state.get_current_instance()

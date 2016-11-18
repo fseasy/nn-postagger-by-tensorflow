@@ -76,10 +76,10 @@ class MlpTagger(object):
                 w_o = tf.Variable( 
                             tf.truncated_normal( (tagdict_sz, hidden_dim), 
                                                  stddev=math.sqrt( 6. / hidden_dim )),
-                            name="wdddd_softmax"
+                            name="b_softmax"
                         )
                 print(tagdict_sz)
-                b_o = tf.get_variable("dddd_softmax",[tagdict_sz],tf.float32)
+                b_o = tf.get_variable("b_softmax",[tagdict_sz],tf.float32)
                 batch_logit = tf.matmul(batch_hidden_out, w_o,transpose_b=True) + b_o
            
             # export the symbol-variables
@@ -95,7 +95,7 @@ class MlpTagger(object):
                 batch_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(
                         self._batch_logit_expr, self._batch_y_input_expr, name="batch_loss")
                 loss = tf.reduce_mean(batch_loss, name="loss")
-            tf.summary.scalar('loss', loss, name="loss_summary", description="test for loss summary")
+            tf.summary.scalar('loss_summary', loss)
             optimizer  = tf.train.GradientDescentOptimizer(learning_rate)
             global_step = tf.Variable(0, name="global_step", trainable=False) # record how much steps updated.
             train_op = optimizer.minimize(loss, global_step=global_step)
@@ -122,13 +122,16 @@ class MlpTagger(object):
             embedding_dim, hidden_dim, learning_rate=0.01):
         window_sz = mlp_data.window_sz
         batch_sz = mlp_data.batch_sz
-        self._build_init_op()
         self._build_annotated_input_placeholder(window_sz)
         self._build_logit_expr(window_sz, mlp_data.worddict_sz, embedding_dim, hidden_dim, mlp_data.tagdict_sz)
         self._build_train_op(learning_rate)
         self._build_eval_op()
+        self._build_init_op()
         
         self._sess.run(self._init_op)
+        
+        batch_cnt = 0
+        devel_freq = 20
         while mlp_data.iterate_time < nr_epoch:
             batch_x, batch_y = mlp_data.get_mlp_next_batch_training_data()
             training_feed_dict = {
@@ -136,6 +139,12 @@ class MlpTagger(object):
                         self._batch_y_input_expr: batch_y
                     }
             self._sess.run(self._train_op, feed_dict=training_feed_dict)
+            ++batch_cnt;
+            if batch_cnt % devel_greq == 0 :
+                # do devel
+                devel(self, mlp_data)
+     def devel(self, mlp_data):
+        pass
 
 
 def main():
