@@ -4,6 +4,7 @@
 import sys
 import os
 import math
+from contextlib import contextmanager
 import tensorflow as tf
 # not good
 _cur_dir = os.path.dirname(__file__)
@@ -14,13 +15,25 @@ from mlp_data import MlpData, RandomSeed
 class MlpTagger(object):
     def __init__(self):
         self._graph = tf.Graph()
-        config = tf.ConfigProto()
+        # session and config
+        config = tf.ConfigProto(log_device_placement=True)
         config.gpu_options.allow_growth=True
-        self._sess = tf.Session(graph=self._graph,config=config)
+        self._sess = tf.Session(graph=self._graph, config=config)
+        
         self._batch_x_input_expr = None
         self._batch_y_input_expr = None
         self._batch_logit_expr = None
     
+    @contextmanager
+    def _set_context():
+        g_mgr = self._graph.as_default()
+        g = g_mgr.__enter__()
+        d_mgr = tf.device("/cpu:0")
+        d_mgr.__enter__()
+        yield g
+        d_mgr.__exit__(*sys.exc_info())
+        g_mgr.__exit__(*sys.exc_info())
+
     def _build_annotated_input_placeholder(self, window_sz):
         with self._graph.as_default(), tf.device("/cpu:0"):
             with tf.name_scope("input"):
