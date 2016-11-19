@@ -95,7 +95,9 @@ class MlpData(object):
         self.word2idx = dict()
         self.idx2word = list()
         self.counter = list()
-        for word, count in word_counter.items():
+        word_count_list = word_counter.most_common() # if we use Coutner.items() for iteration, it'll cause unordered in every time.
+                                                     # => lead to word has different id in every run. But We Want The Identity.
+        for word, count in word_count_list:
             self.word2idx[word] = len(self.idx2word)
             self.idx2word.append(word)
             self.counter.append(count)
@@ -128,9 +130,10 @@ class MlpData(object):
         for instance in self.raw_training_data:
             tag_list = instance[1]
             tag_set.update(tag_list)
+        ordered_tag_list = sorted(list(tag_set)) # using ordered for identity.
         self.tag2idx = dict()
         self.idx2tag = list()
-        for tag in tag_set:
+        for tag in ordered_tag_list:
             self.tag2idx[tag] = len(self.idx2tag)
             self.idx2tag.append(tag)
         self._tagdict_sz = len(self.idx2tag)
@@ -273,8 +276,8 @@ class MlpData(object):
             instance_cnt += 1
         state.move2next_pos() # for next batch generate.
         return X, Y
-
-    def get_mlp_devel_data(self):
+    
+    def _generate_mlp_devel_data(self):
         '''
         generate devel data for varifying model.
         @return (X, Y), X has format: 
@@ -309,7 +312,32 @@ class MlpData(object):
             X.append(window_list)
             # processing Y
             Y.append(y_list)
+        self._devel_mlp_data = (X, Y)
         return X, Y
+
+    def get_mlp_devel_data(self):
+        if getattr(self, "_devel_mlp_data", None) is None:
+            return self._generate_mlp_devel_data()
+        return self._devel_mlp_data
+
+    def mlp_batch_devel_data_generator(self, batch_sz):
+        batch_X = []
+        batch_Y = []
+        cnt = 0
+        X, Y = self.get_mlp_devel_data()
+        for x_instance, y_instance in zip(X, Y):
+            for window_x, y in zip(x_instance, y_instance):
+                if cnt == batch_sz:
+                    yield (batch_X, batch_Y)
+                    # clear
+                    batch_X = []
+                    batch_Y = []
+                    cnt = 0
+                batch_X.append(window_x)
+                batch_Y.append(y)
+                cnt += 1
+        if cnt > 0:
+            yield (batch_X, batch_Y)
 
     def get_mlp_test_data(self):
         '''

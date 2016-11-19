@@ -16,7 +16,7 @@ class MlpTagger(object):
     def __init__(self):
         self._graph = tf.Graph()
         # session and config
-        config = tf.ConfigProto(log_device_placement=True)
+        config = tf.ConfigProto(log_device_placement=False)
         config.gpu_options.allow_growth=True
         self._sess = tf.Session(graph=self._graph, config=config)
         
@@ -25,7 +25,7 @@ class MlpTagger(object):
         self._batch_logit_expr = None
     
     @contextmanager
-    def _set_context():
+    def _set_context(self):
         g_mgr = self._graph.as_default()
         g = g_mgr.__enter__()
         d_mgr = tf.device("/cpu:0")
@@ -33,9 +33,13 @@ class MlpTagger(object):
         yield g
         d_mgr.__exit__(*sys.exc_info())
         g_mgr.__exit__(*sys.exc_info())
+    
+    def _set_random_seed(self, random_seed):
+        with self._set_context():
+            tf.set_random_seed(random_seed)
 
     def _build_annotated_input_placeholder(self, window_sz):
-        with self._graph.as_default(), tf.device("/cpu:0"):
+        with self._set_context():
             with tf.name_scope("input"):
                 batch_x_input = tf.placeholder(tf.int32, shape=(None, window_sz))
                 batch_y_input = tf.placeholder(tf.int32, shape=(None,))
@@ -52,7 +56,7 @@ class MlpTagger(object):
         self._batch_x_input_expr = batch_x_input
 
     def _build_logit_expr(self, window_sz, worddict_sz, embedding_dim, hidden_dim, tagdict_sz):
-        with self._graph.as_default(), tf.device("/cpu:0"):
+        with self._set_context():
             with tf.name_scope("project_layer"):
                 embedding_table = tf.Variable( 
                                     tf.random_uniform( (worddict_sz, embedding_dim), -1., 1. ),
@@ -78,7 +82,6 @@ class MlpTagger(object):
                                                  stddev=math.sqrt( 6. / hidden_dim )),
                             name="b_softmax"
                         )
-                print(tagdict_sz)
                 b_o = tf.get_variable("b_softmax",[tagdict_sz],tf.float32)
                 batch_logit = tf.matmul(batch_hidden_out, w_o,transpose_b=True) + b_o
            
@@ -86,7 +89,7 @@ class MlpTagger(object):
             self._batch_logit_expr = batch_logit # for eval or predict
             
     def _build_train_op(self, learning_rate):
-        with self._graph.as_default(), tf.device("/cpu:0"):
+        with self._set_context():
             with tf.name_scope("loss"):
                 # for `sparse_softmax_cross_entropy_with_logits`,
                 #     the input label is just the right index
@@ -106,32 +109,39 @@ class MlpTagger(object):
         # eval may be separately, or including in training.
         if self._batch_logit_expr is None:
             self._build_logit_expr()
-        with self._graph.as_default() , tf.device("/cpu:0"):
+        with self._set_context():
             with tf.name_scope("eval"):
                 correct = tf.nn.in_top_k(self._batch_logit_expr, self._batch_y_input_expr, 1, name="is_correct")
                 cnt_op = tf.reduce_sum(tf.cast(correct, tf.int32))
         self._devel_op = cnt_op
 
     def _build_init_op(self):
-        with self._graph.as_default(), tf.device("/cpu:0"):
+        with self._set_context():
             init_op = tf.initialize_all_variables()
         
         self._init_op = init_op
 
-    def train(self, mlp_data, nr_epoch,
-            embedding_dim, hidden_dim, learning_rate=0.01):
+    def train(self, mlp_data, nr_epoch=15,
+            embedding_dim=50, hidden_dim=100, learning_rate=0.01, random_seed=RandomSeed):
         window_sz = mlp_data.window_sz
         batch_sz = mlp_data.batch_sz
+        self._set_random_seed(random_seed)
         self._build_annotated_input_placeholder(window_sz)
         self._build_logit_expr(window_sz, mlp_data.worddict_sz, embedding_dim, hidden_dim, mlp_data.tagdict_sz)
         self._build_train_op(learning_rate)
         self._build_eval_op()
         self._build_init_op()
-        
+       
+
+        # build saver
+        with self._set_context():
+            saver = tf.train.Saver()
+
         self._sess.run(self._init_op)
         
         batch_cnt = 0
-        devel_freq = 20
+        devel_freq = 400
+        best_devel_acc = 0.
         while mlp_data.iterate_time < nr_epoch:
             batch_x, batch_y = mlp_data.get_mlp_next_batch_training_data()
             training_feed_dict = {
@@ -139,18 +149,37 @@ class MlpTagger(object):
                         self._batch_y_input_expr: batch_y
                     }
             self._sess.run(self._train_op, feed_dict=training_feed_dict)
-            ++batch_cnt;
-            if batch_cnt % devel_greq == 0 :
+            batch_cnt += 1
+            if batch_cnt % devel_freq == 0 :
                 # do devel
-                devel(self, mlp_data)
-     def devel(self, mlp_data):
-        pass
+                devel_acc = self.devel(mlp_data)
+                if devel_acc > best_devel_acc:
+                    print("better model found. save it.")
+                    saver.save(self._sess, "/tmp/model.ckpt")
+                    best_devel_acc = devel_acc
+
+
+    def devel(self, mlp_data):
+       devel_batch_sz = 32
+       correct_cnt = total_cnt = 0
+       devel_cnt = 0
+       for batch_X, batch_Y in mlp_data.mlp_batch_devel_data_generator(devel_batch_sz):
+           devel_feed_dict = {
+                       self._batch_x_input_expr: batch_X,
+                       self._batch_y_input_expr: batch_Y
+                   }
+           correct_cnt += self._sess.run(self._devel_op, feed_dict=devel_feed_dict)
+           total_cnt += len(batch_X)
+           devel_cnt += 1
+       acc = float(correct_cnt) / total_cnt
+       print("devel accuracy: {}(accuracy count: {}, total count: {})".format(acc, correct_cnt, total_cnt))
+       return acc
 
 
 def main():
     mlp_data = MlpData()
     mlp_tagger = MlpTagger()
-    mlp_tagger.train(mlp_data, 15, 50, 100)
+    mlp_tagger.train(mlp_data, 5)
 
 if __name__ == "__main__":
     main()
