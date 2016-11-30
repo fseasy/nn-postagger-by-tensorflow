@@ -163,7 +163,11 @@ class TokenProcessor(object):
         return self._idx2tag[tagidx] if 0 <= tagidx < self._tagdict_sz else "<invalid>"
     
     def _translate_annotated_data(self, dataset):
-        ''' raw annotated dataset => index annotated dataset
+        ''' 
+        raw annotated dataset => index annotated dataset
+        index annotated dataset has the format like:
+        [ (X1, Y1), ... ], where X1, Y1 is the sequence of one instance of x and y
+        @return ( idx_dataset, num_all_token ), where idx_dataset = [ (X1, Y1), ... ]
         '''
         idx_dataset = []
         num_all_token = 0
@@ -175,7 +179,11 @@ class TokenProcessor(object):
         return (idx_dataset, num_all_token)
     
     def _translate_unannotated_data(self, dataset):
-        ''' raw unannotated dataset => inedx unannotated datasest
+        '''
+        raw unannotated dataset => inedx unannotated datasest
+        index unannotated dataset has the format like:
+        [X1, ...] where X1 is a sequence
+        @return (idx_dataset, num_all_token), where idx_dataset = [X1, ...]
         '''
         idx_dataset = []
         num_all_token = 0

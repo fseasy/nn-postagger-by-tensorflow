@@ -10,7 +10,9 @@ import tensorflow as tf
 _cur_dir = os.path.dirname(__file__)
 sys.path.append(_cur_dir)
 
-from mlp_data import MlpData, RandomSeed
+from mlp_data import MlpData
+
+RandomSeed = 1234
 
 class MlpTagger(object):
     def __init__(self):
@@ -50,7 +52,7 @@ class MlpTagger(object):
     def _build_unannotated_input_placeholder(self, window_sz):
         if self._batch_x_input_expr is not None:
             return
-        with self._graph.as_default(), tf.device("/cpu:0"):
+        with self._set_context():
             with tf.name_scope("input"):
                 batch_x_input = tf.placeholder(tf.int32, shape=(None, window_sz))
         self._batch_x_input_expr = batch_x_input
@@ -71,7 +73,7 @@ class MlpTagger(object):
                             name="w"
                         )
                 b = tf.Variable(
-                            tf.zeros( [hidden_dim,] ),
+                            tf.zeros( (hidden_dim,) ),
                             name="b"
                         )
                 batch_net = tf.matmul(batch_x_concated, w, transpose_b=True) + b
@@ -80,13 +82,17 @@ class MlpTagger(object):
                 w_o = tf.Variable( 
                             tf.truncated_normal( (tagdict_sz, hidden_dim), 
                                                  stddev=math.sqrt( 6. / hidden_dim )),
+                            name="w_softmax"
+                        )
+                b_o = tf.Variable(
+                            tf.zeros( (tagdict_sz,) ),
                             name="b_softmax"
                         )
-                b_o = tf.get_variable("b_softmax",[tagdict_sz],tf.float32)
                 batch_logit = tf.matmul(batch_hidden_out, w_o,transpose_b=True) + b_o
            
             # export the symbol-variables
             self._batch_logit_expr = batch_logit # for eval or predict
+            return batch_logit
             
     def _build_train_op(self, learning_rate):
         with self._set_context():
@@ -104,9 +110,10 @@ class MlpTagger(object):
             train_op = optimizer.minimize(loss, global_step=global_step)
         # export the symbol-variable
         self._train_op = train_op
+        return train_op
 
-    def _build_eval_op(self):
-        # eval may be separately, or including in training.
+    def _build_devel_op(self):
+        # devel may be separately, or including in training.
         if self._batch_logit_expr is None:
             self._build_logit_expr()
         with self._set_context():
@@ -114,25 +121,24 @@ class MlpTagger(object):
                 correct = tf.nn.in_top_k(self._batch_logit_expr, self._batch_y_input_expr, 1, name="is_correct")
                 cnt_op = tf.reduce_sum(tf.cast(correct, tf.int32))
         self._devel_op = cnt_op
+        return cnt_op
 
     def _build_init_op(self):
         with self._set_context():
             init_op = tf.initialize_all_variables()
-        
         self._init_op = init_op
+        return init_op
 
-    def train(self, mlp_data, nr_epoch=15,
+    def train(self, mlp_data, nr_epoch=15, batch_sz=64,
             embedding_dim=50, hidden_dim=100, learning_rate=0.01, random_seed=RandomSeed):
         window_sz = mlp_data.window_sz
-        batch_sz = mlp_data.batch_sz
         self._set_random_seed(random_seed)
         self._build_annotated_input_placeholder(window_sz)
         self._build_logit_expr(window_sz, mlp_data.worddict_sz, embedding_dim, hidden_dim, mlp_data.tagdict_sz)
         self._build_train_op(learning_rate)
-        self._build_eval_op()
+        self._build_devel_op()
         self._build_init_op()
        
-
         # build saver
         with self._set_context():
             saver = tf.train.Saver()
@@ -142,44 +148,61 @@ class MlpTagger(object):
         batch_cnt = 0
         devel_freq = 400
         best_devel_acc = 0.
-        while mlp_data.iterate_time < nr_epoch:
-            batch_x, batch_y = mlp_data.get_mlp_next_batch_training_data()
-            training_feed_dict = {
-                        self._batch_x_input_expr: batch_x,
-                        self._batch_y_input_expr: batch_y
-                    }
-            self._sess.run(self._train_op, feed_dict=training_feed_dict)
-            batch_cnt += 1
-            if batch_cnt % devel_freq == 0 :
-                # do devel
-                devel_acc = self.devel(mlp_data)
-                if devel_acc > best_devel_acc:
-                    print("better model found. save it.")
-                    saver.save(self._sess, "/tmp/model.ckpt")
-                    best_devel_acc = devel_acc
+        
+        def do_devel(header):
+            nonlocal best_devel_acc
+            nonlocal saver
+            print(header)
+            devel_acc = self.devel(mlp_data)
+            if devel_acc > best_devel_acc:
+                print("better model found. save it.")
+                saver.save(self._sess, "/tmp/model.ckpt")
+                best_devel_acc = devel_acc
 
+        training_data = mlp_data.build_training_data()
+        for i in range(nr_epoch):
+            for batch_x, batch_y in mlp_data.batch_data_generator(training_data, batch_sz):
+                training_feed_dict = {
+                    self._batch_x_input_expr: batch_x,
+                    self._batch_y_input_expr: batch_y
+                }
+                self._sess.run(self._train_op, feed_dict=training_feed_dict)
+                batch_cnt += 1
+                #if batch_cnt % devel_freq == 0 :
+                #    do_devel("end of another {} batches".format(devel_freq))
+            do_devel("end of epoch {}, do devel".format(i + 1))
+            
 
     def devel(self, mlp_data):
        devel_batch_sz = 32
        correct_cnt = total_cnt = 0
-       devel_cnt = 0
-       for batch_X, batch_Y in mlp_data.mlp_batch_devel_data_generator(devel_batch_sz):
+       devel_data = mlp_data.build_devel_data()
+       for batch_x, batch_y in mlp_data.batch_data_generator(devel_data, devel_batch_sz, fill_when_not_enouth=False):
            devel_feed_dict = {
-                       self._batch_x_input_expr: batch_X,
-                       self._batch_y_input_expr: batch_Y
+                       self._batch_x_input_expr: batch_x,
+                       self._batch_y_input_expr: batch_y
                    }
            correct_cnt += self._sess.run(self._devel_op, feed_dict=devel_feed_dict)
-           total_cnt += len(batch_X)
-           devel_cnt += 1
-       acc = float(correct_cnt) / total_cnt
-       print("devel accuracy: {}(accuracy count: {}, total count: {})".format(acc, correct_cnt, total_cnt))
+           total_cnt += len(batch_x)
+       acc = float(correct_cnt) / total_cnt * 100
+       print("devel accuracy: {:.2f}% (correct: {}, total: {})".format(acc, correct_cnt, total_cnt))
        return acc
 
 
 def main():
-    mlp_data = MlpData()
+    params = {
+            "window_sz": 5,
+            "nr_epoch": 15,
+            "batch_sz": 64,
+            "embedding_dim": 50,
+            "hidden_dim": 100,
+            "learning_rate": 0.01,
+    }
+    mlp_data = MlpData(RandomSeed, params["window_sz"] )
     mlp_tagger = MlpTagger()
-    mlp_tagger.train(mlp_data, 5)
+    mlp_tagger.train(mlp_data, nr_epoch=params["nr_epoch"], batch_sz=params["batch_sz"],
+                     embedding_dim=params["embedding_dim"], hidden_dim=params["hidden_dim"],
+                     learning_rate=params["learning_rate"])
 
 if __name__ == "__main__":
     main()

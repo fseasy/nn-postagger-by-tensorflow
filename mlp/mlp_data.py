@@ -22,7 +22,7 @@ class MlpData(TokenProcessor):
     
     def __init__(self, rng_seed, window_sz=5, 
                  unkreplace_cnt_threshold=1, unkreplace_prob_threshold=0.2, loglevel=logging.INFO):
-        TokenProcessor.__init__(rng_seed, unkreplace_cnt_threshold, unkreplace_prob_threshold) 
+        TokenProcessor.__init__(self, rng_seed, unkreplace_cnt_threshold, unkreplace_prob_threshold) 
         
         self._window_sz = window_sz
         self._rng = random.Random(rng_seed)
@@ -34,7 +34,7 @@ class MlpData(TokenProcessor):
         if sent_len == 0:
             return []
         window_token_list = []
-        window_queue  = collections.deque()
+        window_queue  = collections.deque(maxlen=self._window_sz)
         half_sz = self._window_sz // 2
         # init the first window
         window_queue.extend( [self._sos_idx] * half_sz )
@@ -62,6 +62,8 @@ class MlpData(TokenProcessor):
         @has_tag whethere the data has tag. see @data
         @return (batch_x, batch_y) if has_tag == True
                 batch_x if has_tag == False
+                where batch_x = [ W1, ... ] and W1 is the window of word1; 
+                batch_y = [y1, ...] and y1 is the tag of word1
         '''
         data_size = len(data)
         if data_size == 0:
@@ -74,28 +76,69 @@ class MlpData(TokenProcessor):
         access_order = [i for i in range(0, data_size)] # for compability of Py2 and Py3
         self._rng.shuffle(access_order)
         # 2. generate one window X
-        get_x = lambda i: data[access_order[i]]
-
-
-
-
-def test():
-    mlp_data = MlpData(window_sz=3, batch_sz=10)
-    for i in range(5):
-        X, Y = mlp_data.get_mlp_next_batch_training_data()
-        for x, y in zip(X, Y):
-            print(x, y)
-            for wi in x:
-                print(mlp_data.convert_idx2word(wi), end=",")
-            print("\t", end="")
-            print(mlp_data.convert_idx2tag(y))
-    print()
+        get_x = lambda i: data[access_order[i]][0] if has_tag else data[access_order[i]]
+        get_y = lambda i: data[access_order[i]][1] if has_tag else None
+        batch_x = []
+        batch_y = []
+        for i in range(data_size):
+            x_window_list = self._generate_window_token_list(get_x(i))
+            y = get_y(i)
+            for pos, x_window in enumerate(x_window_list):
+                if len(batch_x) == batch_sz:
+                    if has_tag:
+                        yield (batch_x, batch_y)
+                    else:
+                        yield batch_x
+                    batch_x = []
+                    batch_y = []
+                batch_x.append(x_window)
+                if has_tag:
+                    batch_y.append(y[pos])
+        # process the end
+        # 1. no left
+        if len(batch_x) == 0: 
+            return
+        # 2. no need fill
+        if not fill_when_not_enouth:
+            if has_tag:
+                yield (batch_x, batch_y)
+            else:
+                yield batch_x
+        # 3. fill
+        else:
+            # just copy self
+            filled_len = len(batch_x)
+            left_len = batch_sz - filled_len
+            while filled_len < left_len:
+                batch_x.extend(batch_x[:filled_len])
+                if has_tag:
+                    batch_y.extend(batch_y[:filled_len])
+                left_len -= filled_len
+                filled_len *= 2
+            batch_x.extend(batch_x[:left_len])
+            if has_tag:
+                batch_y.extend(batch_y[:left_len])
+            assert( len(batch_x) == batch_sz)
+            if has_tag:
+                yield (batch_x, batch_y)
+            else:
+                yield batch_x
     
-    devel_data = mlp_data.get_mlp_devel_data()
-    print("devel data has instance cnt: {}".format(len(devel_data[0])))
-    test_data = mlp_data.get_mlp_test_data()
-    print("test data has instance cnt: " , len(test_data))
-    print("shuffled_time: ", mlp_data.iterate_time())
+    @property
+    def window_sz(self):
+        return self._window_sz
+
+
+
+def unit_test():
+    mlp_data = MlpData(1234, window_sz=3)
+    training_data = mlp_data.build_training_data()
+    for batch_x, batch_y in mlp_data.batch_data_generator(training_data[:1], batch_sz=20):
+        print(batch_x)
+        print(batch_y)
+    test_data = mlp_data.build_test_data()
+    for batch_x in mlp_data.batch_data_generator(test_data[-1:], batch_sz=10, has_tag=False, fill_when_not_enouth=False):
+        print(batch_x)
 
 if __name__ == "__main__":
-    test()
+    unit_test()
