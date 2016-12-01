@@ -18,7 +18,7 @@ class MlpTagger(object):
     def __init__(self):
         self._graph = tf.Graph()
         # session and config
-        config = tf.ConfigProto(log_device_placement=False)
+        config = tf.ConfigProto(log_device_placement=True)
         config.gpu_options.allow_growth=True
         self._sess = tf.Session(graph=self._graph, config=config)
         
@@ -30,7 +30,7 @@ class MlpTagger(object):
     def _set_context(self):
         g_mgr = self._graph.as_default()
         g = g_mgr.__enter__()
-        d_mgr = tf.device("/cpu:0")
+        d_mgr = tf.device("/gpu:0")
         d_mgr.__enter__()
         yield g
         d_mgr.__exit__(*sys.exc_info())
@@ -150,14 +150,12 @@ class MlpTagger(object):
         best_devel_acc = 0.
         
         def do_devel(header):
-            nonlocal best_devel_acc
-            nonlocal saver
             print(header)
             devel_acc = self.devel(mlp_data)
             if devel_acc > best_devel_acc:
                 print("better model found. save it.")
-                saver.save(self._sess, "/tmp/model.ckpt")
-                best_devel_acc = devel_acc
+                saver.save(self._sess, "model.ckpt")
+            return max(best_devel_acc, devel_acc)
 
         training_data = mlp_data.build_training_data()
         for i in range(nr_epoch):
@@ -169,8 +167,8 @@ class MlpTagger(object):
                 self._sess.run(self._train_op, feed_dict=training_feed_dict)
                 batch_cnt += 1
                 #if batch_cnt % devel_freq == 0 :
-                #    do_devel("end of another {} batches".format(devel_freq))
-            do_devel("end of epoch {}, do devel".format(i + 1))
+                #    best_devel_acc = do_devel("end of another {} batches".format(devel_freq))
+            best_devel_acc = do_devel("end of epoch {}, do devel".format(i + 1))
             
 
     def devel(self, mlp_data):
