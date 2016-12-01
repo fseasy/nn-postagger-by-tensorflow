@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding:utf-8 -*-
 
+from __future__ import print_function
+from __future__ import division
+
 import sys
 import os
 import math
@@ -30,10 +33,10 @@ class MlpTagger(object):
     def _set_context(self):
         g_mgr = self._graph.as_default()
         g = g_mgr.__enter__()
-        d_mgr = tf.device("/gpu:0")
-        d_mgr.__enter__()
+        #d_mgr = tf.device("/gpu:0")
+        #d_mgr.__enter__()
         yield g
-        d_mgr.__exit__(*sys.exc_info())
+        #d_mgr.__exit__(*sys.exc_info())
         g_mgr.__exit__(*sys.exc_info())
     
     def _set_random_seed(self, random_seed):
@@ -105,7 +108,7 @@ class MlpTagger(object):
                         self._batch_logit_expr, self._batch_y_input_expr, name="batch_loss")
                 loss = tf.reduce_mean(batch_loss, name="loss")
             tf.summary.scalar('loss_summary', loss)
-            optimizer  = tf.train.GradientDescentOptimizer(learning_rate)
+            optimizer  = tf.train.AdadeltaOptimizer(learning_rate)
             global_step = tf.Variable(0, name="global_step", trainable=False) # record how much steps updated.
             train_op = optimizer.minimize(loss, global_step=global_step)
         # export the symbol-variable
@@ -131,6 +134,10 @@ class MlpTagger(object):
 
     def train(self, mlp_data, nr_epoch=15, batch_sz=64,
             embedding_dim=50, hidden_dim=100, learning_rate=0.01, random_seed=RandomSeed):
+        '''
+        do training.
+        @return (best_devel_score, devel_score_list)
+        '''
         window_sz = mlp_data.window_sz
         self._set_random_seed(random_seed)
         self._build_annotated_input_placeholder(window_sz)
@@ -148,14 +155,15 @@ class MlpTagger(object):
         batch_cnt = 0
         devel_freq = 400
         best_devel_acc = 0.
-        
-        def do_devel(header):
+        devel_score_list = [] 
+        def do_devel(header, devel_score_list):
             print(header)
             devel_acc = self.devel(mlp_data)
+            devel_score_list.append(devel_acc)
             if devel_acc > best_devel_acc:
                 print("better model found. save it.")
                 saver.save(self._sess, "model.ckpt")
-            return max(best_devel_acc, devel_acc)
+            return devel_acc
 
         training_data = mlp_data.build_training_data()
         for i in range(nr_epoch):
@@ -167,8 +175,10 @@ class MlpTagger(object):
                 self._sess.run(self._train_op, feed_dict=training_feed_dict)
                 batch_cnt += 1
                 #if batch_cnt % devel_freq == 0 :
-                #    best_devel_acc = do_devel("end of another {} batches".format(devel_freq))
-            best_devel_acc = do_devel("end of epoch {}, do devel".format(i + 1))
+                #    best_devel_acc = max(best_devel_acc, do_devel("end of another {} batches".format(devel_freq), devel_score_list))
+            devel_acc = do_devel("end of epoch {}, do devel".format(i + 1), devel_score_list)
+            best_devel_acc = max(best_devel_acc, devel_acc)
+        return (best_devel_acc, devel_score_list)
             
 
     def devel(self, mlp_data):
@@ -187,20 +197,28 @@ class MlpTagger(object):
        return acc
 
 
-def main():
+def train():
     params = {
             "window_sz": 5,
             "nr_epoch": 15,
             "batch_sz": 64,
             "embedding_dim": 50,
             "hidden_dim": 100,
-            "learning_rate": 0.01,
+            "learning_rate": 0.001,
     }
     mlp_data = MlpData(RandomSeed, params["window_sz"] )
     mlp_tagger = MlpTagger()
-    mlp_tagger.train(mlp_data, nr_epoch=params["nr_epoch"], batch_sz=params["batch_sz"],
+    best_devel_score, devel_score_list = mlp_tagger.train(mlp_data, nr_epoch=params["nr_epoch"], batch_sz=params["batch_sz"],
                      embedding_dim=params["embedding_dim"], hidden_dim=params["hidden_dim"],
                      learning_rate=params["learning_rate"])
+    
+    print("best devel score: {:.2f}".format(best_devel_score))
+    with open("score_list.{}".format(params["learning_rate"]), "wt") as logf:
+        for score in devel_score_list:
+            print(score, file=logf)
+
+def main():
+    train()
 
 if __name__ == "__main__":
     main()
