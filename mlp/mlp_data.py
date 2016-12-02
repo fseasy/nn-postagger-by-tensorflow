@@ -48,8 +48,15 @@ class MlpData(TokenProcessor):
             window_queue.append(x[right_most] if right_most < sent_len else self._eos_idx)
             window_token_list.append(list(window_queue))
         return window_token_list
+    
+    def replace_low_freq_token_with_unk(self, x):
+        if type(x) is list:
+            y = [ self.replace_wordidx2unk(idx) for idx in x ]
+        else:
+            y = self.replace_wordidx2unk(idx)
+        return y
 
-    def batch_data_generator(self, data, batch_sz=128, fill_when_not_enouth=True, has_tag=True):
+    def batch_data_generator(self, data, batch_sz=128, fill_when_not_enouth=True, has_tag=True, has_unk_replace=False):
         '''
         A generator to produce the Mlp window batch data.
         @data original data, probably is the result of `build_training_data`/ `build_devel_data`, `build_test_data`
@@ -76,7 +83,8 @@ class MlpData(TokenProcessor):
         access_order = [i for i in range(0, data_size)] # for compability of Py2 and Py3
         self._rng.shuffle(access_order)
         # 2. generate one window X
-        get_x = lambda i: data[access_order[i]][0] if has_tag else data[access_order[i]]
+        _get_x = lambda i: data[access_order[i]][0] if has_tag else data[access_order[i]] # get original x
+        get_x = lambda i: self.replace_low_freq_token_with_unk(_get_x(i)) if has_unk_replace else _get_x(i) # get replaced x
         get_y = lambda i: data[access_order[i]][1] if has_tag else None
         batch_x = []
         batch_y = []
