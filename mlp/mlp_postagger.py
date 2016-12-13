@@ -10,10 +10,11 @@ import math
 from contextlib import contextmanager
 import tensorflow as tf
 # not good
-_cur_dir = os.path.dirname(__file__)
-sys.path.append(_cur_dir)
+_package_dir = os.path.normpath(os.path.join(os.path.dirname(__file__), "../"))
+sys.path.append(_package_dir)
 
-from mlp_data import MlpData
+from mlp.mlp_data import MlpData
+from utils.tf_utils import TFUtils
 
 RandomSeed = 1234
 
@@ -97,7 +98,7 @@ class MlpTagger(object):
             self._batch_logit_expr = batch_logit # for eval or predict
             return batch_logit
             
-    def _build_train_op(self, learning_rate):
+    def _build_train_op(self, optimizer_constructor, learning_rate):
         with self._set_context():
             with tf.name_scope("loss"):
                 # for `sparse_softmax_cross_entropy_with_logits`,
@@ -108,7 +109,7 @@ class MlpTagger(object):
                         self._batch_logit_expr, self._batch_y_input_expr, name="batch_loss")
                 loss = tf.reduce_mean(batch_loss, name="loss")
             tf.summary.scalar('loss_summary', loss)
-            optimizer  = tf.train.AdadeltaOptimizer(learning_rate)
+            optimizer  = optimizer_constructor(learning_rate)
             global_step = tf.Variable(0, name="global_step", trainable=False) # record how much steps updated.
             train_op = optimizer.minimize(loss, global_step=global_step)
         # export the symbol-variable
@@ -133,7 +134,8 @@ class MlpTagger(object):
         return init_op
 
     def train(self, mlp_data, nr_epoch=15, batch_sz=64,
-            embedding_dim=50, hidden_dim=100, learning_rate=0.01, random_seed=RandomSeed):
+            embedding_dim=50, hidden_dim=100, opt_constructor=tf.train.GradientDescentOptimizer,
+            learning_rate=0.01, random_seed=RandomSeed):
         '''
         do training.
         @return (best_devel_score, devel_score_list)
@@ -142,7 +144,7 @@ class MlpTagger(object):
         self._set_random_seed(random_seed)
         self._build_annotated_input_placeholder(window_sz)
         self._build_logit_expr(window_sz, mlp_data.worddict_sz, embedding_dim, hidden_dim, mlp_data.tagdict_sz)
-        self._build_train_op(learning_rate)
+        self._build_train_op(opt_constructor, learning_rate)
         self._build_devel_op()
         self._build_init_op()
        
@@ -204,13 +206,14 @@ def train():
             "batch_sz": 64,
             "embedding_dim": 50,
             "hidden_dim": 100,
-            "learning_rate": 0.001,
+            "opt_name": "adagrad",
+            "learning_rate": 0.001
     }
     mlp_data = MlpData(RandomSeed, params["window_sz"] )
     mlp_tagger = MlpTagger()
     best_devel_score, devel_score_list = mlp_tagger.train(mlp_data, nr_epoch=params["nr_epoch"], batch_sz=params["batch_sz"],
                      embedding_dim=params["embedding_dim"], hidden_dim=params["hidden_dim"],
-                     learning_rate=params["learning_rate"])
+                     opt_constructor=TFUtils.get_optimizer(params["opt_name"]), learning_rate=params["learning_rate"])
     
     print("best devel score: {:.2f}".format(best_devel_score))
     with open("score_list.{}".format(params["learning_rate"]), "wt") as logf:
