@@ -19,6 +19,7 @@ data = tf.placeholder(tf.float32, shape=[None, max_len, num_input_dim]) # tf.pla
 
 output, state = tf.nn.dynamic_rnn(cell, data, parallel_iterations=2) # (cell, inputs, sequence_length, initial_state, dtype, parallel_iterations, swap_memory, time_major, scope)
 
+# 转置，按照给定的顺序；如果不给定，则逆序转置
 output = tf.transpose(output, [1, 0, 2]) #  tf.transpose(tensor, perm, name="transpose") perm is the permutation of dimentions of tensor
 
 # 提取主列
