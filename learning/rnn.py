@@ -3,8 +3,9 @@
 # copying from http://danijar.com/introduction-to-recurrent-networks-in-tensorflow/
 
 # http://r2rt.com/recurrent-neural-networks-in-tensorflow-iii-variable-length-sequences.html
+import numpy as np
 import tensorflow as tf
-from tf.contrib.rnn import (GRUCell,         # cell
+from tensorflow.contrib.rnn import (GRUCell,         # cell
                             DropoutWrapper,  # wrapper
                             MultiRNNCell)    # wrapper
 
@@ -41,3 +42,12 @@ logits = tf.matmul(last, W) + b
 
 loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=target))
 
+with tf.Session() as sess:
+    sess.run(tf.initialize_all_variables())
+
+    batch_size = 10
+    data = np.random.ranf((batch_szie, max_len, num_input_dim))
+    labels = np.random.random_integers(0, num_class - 1, (batch_size, 1))
+    dropout_rate = 0.4
+    loss = sess.run(loss, feed_dict={data: data, target: labels, dropout: dropout_rate})
+    print(loss)
