@@ -23,15 +23,16 @@ max_len = 100
 num_input_dim = 28
 
 data = tf.placeholder(tf.float32, shape=[None, max_len, num_input_dim]) # tf.placeholder(dtype, shape=None, name)
-target = tf.placeholder(tf.int32, shape=[None, 1])
+target = tf.placeholder(tf.int32, shape=[None,])
 
 
-output, state = tf.nn.dynamic_rnn(cell, data, parallel_iterations=2) # (cell, inputs, sequence_length, initial_state, dtype, parallel_iterations, swap_memory, time_major, scope)
+# dtype 与 initial_state 必须指定一个！
+output, state = tf.nn.dynamic_rnn(cell, data, dtype=tf.float32, parallel_iterations=2) # (cell, inputs, sequence_length, initial_state, dtype, parallel_iterations, swap_memory, time_major, scope)
 
 # 转置，按照给定的顺序；如果不给定，则逆序转置
 output = tf.transpose(output, [1, 0, 2]) #  tf.transpose(tensor, perm, name="transpose") perm is the permutation of dimentions of tensor
 
-# 提取主列
+# 提取列
 last = tf.gather(output, int(output.get_shape()[0]) - 1) # (tensor, indices, valid_indices=True, name=None) 
 
 with tf.variable_scope("Softmax_param"):
@@ -42,12 +43,15 @@ logits = tf.matmul(last, W) + b
 
 loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=target))
 
+grad = tf.gradients(loss, data)
+
 with tf.Session() as sess:
-    sess.run(tf.initialize_all_variables())
+    sess.run(tf.global_variables_initializer())
 
     batch_size = 10
-    data = np.random.ranf((batch_szie, max_len, num_input_dim))
-    labels = np.random.random_integers(0, num_class - 1, (batch_size, 1))
+    data_np = np.random.ranf((batch_size, max_len, num_input_dim))
+    labels = np.random.random_integers(0, num_class - 1, (batch_size,))
     dropout_rate = 0.4
-    loss = sess.run(loss, feed_dict={data: data, target: labels, dropout: dropout_rate})
-    print(loss)
+    loss_s, g = sess.run([loss, grad], feed_dict={data: data_np, target: labels, dropout: dropout_rate})
+    print(loss_s)
+    print(g)
