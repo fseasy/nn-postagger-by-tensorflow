@@ -1,3 +1,6 @@
+'''
+rnn learning
+'''
 # -*- coding: utf-8 -*-
 
 # copying from http://danijar.com/introduction-to-recurrent-networks-in-tensorflow/
@@ -44,6 +47,15 @@ logits = tf.matmul(last, W) + b
 loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=target))
 
 grad = tf.gradients(loss, data)
+
+
+new_learning_rate = tf.placeholder(tf.float32, shape=())
+
+with tf.variable_scope("training"):
+    learning_rate = tf.get_variable("learning_rate",shape=(), trainable=False, initializer=tf.constant_initializer(1.0), dtype=tf.float32)
+
+    learning_rate_update = tf.assign(learning_rate, new_learning_rate, name="learning_rate_update")
+
 
 with tf.Session() as sess:
     sess.run(tf.global_variables_initializer())
