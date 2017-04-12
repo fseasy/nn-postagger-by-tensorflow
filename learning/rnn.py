@@ -9,6 +9,7 @@ rnn learning
 import numpy as np
 import tensorflow as tf
 from tensorflow.contrib.rnn import (GRUCell,         # cell
+                            BasicRNNCell,
                             DropoutWrapper,  # wrapper
                             MultiRNNCell)    # wrapper
 
@@ -18,15 +19,15 @@ num_class = 10
 
 dropout = tf.placeholder(tf.float32)
 
-cell = GRUCell(num_neurons) # (num_units, input_size, activations)
+cell = BasicRNNCell(num_neurons) # (num_units, input_size, activations)
 cell = DropoutWrapper(cell, output_keep_prob=1.-dropout) # cell, input_keep_prob, ouptut_keep_prob
 cell = MultiRNNCell([cell] * num_layers) # (cells, state_is_Tuple=True)
 
 max_len = 100
 num_input_dim = 28
 
-data = tf.placeholder(tf.float32, shape=[None, max_len, num_input_dim]) # tf.placeholder(dtype, shape=None, name)
-target = tf.placeholder(tf.int32, shape=[None,])
+data = tf.placeholder(tf.float32, shape=[None, max_len, num_input_dim], name="data") # tf.placeholder(dtype, shape=None, name)
+target = tf.placeholder(tf.int32, shape=[None,], name="target")
 
 
 # dtype 与 initial_state 必须指定一个！
@@ -48,6 +49,8 @@ loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logi
 
 grad = tf.gradients(loss, data)
 
+trainable_variables = tf.trainable_variables()
+variables_gradients = tf.gradients(loss, trainable_variables)
 
 new_learning_rate = tf.placeholder(tf.float32, shape=())
 
@@ -66,4 +69,9 @@ with tf.Session() as sess:
     dropout_rate = 0.4
     loss_s, g = sess.run([loss, grad], feed_dict={data: data_np, target: labels, dropout: dropout_rate})
     print(loss_s)
-    print(g)
+    #print(g)
+    print(trainable_variables)
+    print(variables_gradients)
+    for var in trainable_variables:
+        print(var.name)
+    
