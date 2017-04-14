@@ -23,10 +23,12 @@ cell = BasicRNNCell(num_neurons) # (num_units, input_size, activations)
 cell = DropoutWrapper(cell, output_keep_prob=1.-dropout) # cell, input_keep_prob, ouptut_keep_prob
 cell = MultiRNNCell([cell] * num_layers) # (cells, state_is_Tuple=True)
 
-max_len = 100
+max_len = 20
 num_input_dim = 28
 
-data = tf.placeholder(tf.float32, shape=[None, max_len, num_input_dim], name="data") # tf.placeholder(dtype, shape=None, name)
+
+#data = tf.placeholder(tf.float32, shape=[None, max_len, num_input_dim], name="data") # tf.placeholder(dtype, shape=None, name)
+data = tf.placeholder(tf.float32, shape=[None, max_len, num_input_dim])
 target = tf.placeholder(tf.int32, shape=[None,], name="target")
 
 
@@ -64,10 +66,11 @@ with tf.Session() as sess:
     sess.run(tf.global_variables_initializer())
 
     batch_size = 10
-    data_np = np.random.ranf((batch_size, max_len, num_input_dim))
+    max_len_val = 10
+    data_np = np.random.ranf((batch_size, max_len_val, num_input_dim))
     labels = np.random.random_integers(0, num_class - 1, (batch_size,))
     dropout_rate = 0.4
-    loss_s, g = sess.run([loss, grad], feed_dict={data: data_np, target: labels, dropout: dropout_rate})
+    loss_s, g = sess.run([loss, grad], feed_dict={data: data_np, target: labels, dropout: dropout_rate, max_len: 10})
     print(loss_s)
     #print(g)
     print(trainable_variables)
