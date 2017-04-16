@@ -1,5 +1,10 @@
 #!/usr/bin/env python2
 # -*- coding: utf-8 -*-
+'''
+train procedure
+'''
+from __future__ import print_function
+from __future__ import division
 
 import random
 
@@ -68,23 +73,53 @@ def train(model,
         y_placeholder, loss = model.loss()
         back_prop_op, lr_var = get_optimizer(loss)
         new_lr_placeholder, lr_update_op = get_learning_rate_update_op(lr_var)
-        data_generator = data_batch.batch_training_data_generator(
-            **train_generator_param
-        )
+        sess.run(tf.global_variables_initializer())
         lr_value = 0.1
-        for i, (batch_x, batch_y, sequence_len) in enumerate(data_genrator):
-            # update lr
-            sess.run(lr_update_op, feed_dict={
-                new_lr_placeholder: lr_value
-            })
-            # mini-batch run
-            r = sess.run({"loss": loss, "back_prop": back_prop_op}, feed_dict={
-                input_placeholder: batch_x,
-                y_placeholder: batch_y   
-            })
-            print("mini-batch: {0}, loss= {.2f}".format(i, r["loss"]))
-            
+        for nr_epoch in range(epoch_num):
+            # init the mini-batch generator
+            data_generator = data_batch.batch_training_data_generator(
+                **train_generator_param
+            )
+            # one epoch run
+            for i, (batch_x, batch_y, sequence_len) in enumerate(data_generator):
+                # update lr
+                sess.run(lr_update_op, feed_dict={
+                    new_lr_placeholder: lr_value
+                })
+                # mini-batch run, cal loss and back-propagate
+                r = sess.run({"loss": loss, "back_prop": back_prop_op}, feed_dict={
+                    input_placeholder: batch_x,
+                    y_placeholder: batch_y,
+                    sequence_len_placeholder: sequence_len
+                })
+                print("epoch: {0}, mini-batch: {1}, loss= {2:.2f}".format(
+                    nr_epoch, i, r["loss"]))
+            lr_value = lr_value / (nr_epoch + 1)
 
-
+if __name__ == "__main__":
+    TEST_TRAIN_FPATH = "data/sample/train.data"
+    training_data = data_process.get_training_data(TEST_TRAIN_FPATH)
+    datadef = data_process.datadef
+    seed = 1234
+    model_param = ModelParam(
+        rng_seed=seed,
+        word_num=datadef.word_num,
+        embedding_dim=10,
+        x_padding_id=datadef.x_padding_id,
+        tag_num=datadef.tag_num,
+        y_padding_id=datadef.y_padding_id,
+        max_timestep_in_global=data_process.get_annotated_max_len_in_global(
+            training_data
+        ),
+        rnn_h_dim_list=[5, ],
+        rnn_dropout_rate_list=[0., ],
+        rnn_type="rnn"
+    )
+    m = RNNModel(model_param)
+    train(m, training_data,
+        batch_size=2,
+        epoch_num=5,
+        seed=seed
+    )
     
     

@@ -5,7 +5,7 @@ data processing.
 build dict, translate word to id.
 ready batch data.
 '''
-
+import io
 from collections import Counter
 try:
     import cPickle as pickle
@@ -14,7 +14,7 @@ except:
 
 class DataDef(object):
     '''
-    Data definition, including word2id, id2word, word_cnt, seed
+    Data definition, including word2id, id2word, word_cnt
     '''
     _PADDING_ID = 0
     _SOS_ID = 1
@@ -27,7 +27,7 @@ class DataDef(object):
 
     _PADDING_TAG_ID = 0
     _PADDING_TAG_REPR = u"X"
-    def __init__(self, seed=1234):
+    def __init__(self):
         inf = float("inf")
         self._word2id = {
                     self._PADDING_WORD_REPR: self._PADDING_ID,
@@ -46,7 +46,6 @@ class DataDef(object):
                     self._PADDING_TAG_REPR: self._PADDING_TAG_ID 
         }
         self._id2tag = [self._PADDING_TAG_REPR]
-        self._seed = seed
 
     @property
     def word2id(self):
@@ -208,14 +207,14 @@ def _read_annotated_text_sample_generator(fpath, encoding):
     Returns:
         A tuple, (word_list, tag_list)
     '''
-    with open(fpath) as f:
+    with io.open(fpath, "rt", encoding=encoding) as f:
         while True:
             x_text = f.readline()
             y_text = f.readline()
-            if x_text == "" or y_text == "":
+            if x_text == u"" or y_text == u"":
                 break
-            x_text = x_text.decode(encoding).strip()
-            y_text = y_text.decode(encoding).strip()
+            x_text = x_text.strip()
+            y_text = y_text.strip()
             word_list, tag_list = annotated_data2word_tag_list(
                     x_text, y_text)
             yield (word_list, tag_list)
@@ -229,11 +228,16 @@ def _read_unannotated_text_sample_generator(fpath, encoding):
     Returns:
         word_list
     '''
-    with open(fpath) as f:
+    with io.open(fpath, "rt", encoding=encoding) as f:
         for line in f:
-            line = line.decode(encoding).strip()
+            line = line.strip()
             word_list = unannotated_data2word_list(line)
             yield word_list
+
+####################
+# main api
+####################
+
 
 def get_training_data(training_fpath, encoding="utf-8", datadef=datadef):
     '''
@@ -243,9 +247,8 @@ def get_training_data(training_fpath, encoding="utf-8", datadef=datadef):
         encoding: file encoding.
         datadef: datadef
     Returns:
-        A tuple, (X, Y)
-        - X, list of x, x = [id1, id2]
-        - Y, list of y, y = [tid1, tid2]
+        A list, [(x1, y1), ...]
+        - (x1, y1) one pair for x and y
     '''
     X_text = []
     Y_text = []
@@ -254,13 +257,11 @@ def get_training_data(training_fpath, encoding="utf-8", datadef=datadef):
             X_text.append(word_list)
             Y_text.append(tag_list)
     build_dict(X_text, Y_text, datadef)
-    X = []
-    Y = []
+    training_data = []
     for x_text, y_text in zip(X_text, Y_text):
         x, y = annotated_text_sample2id_sample(x_text, y_text, datadef)
-        X.append(x)
-        Y.append(y)
-    return X, Y
+        training_data.append((x, y))
+    return training_data
 
 def get_develop_data(dev_fpath, encoding="utf-8", datadef=datadef):
     '''
@@ -270,18 +271,15 @@ def get_develop_data(dev_fpath, encoding="utf-8", datadef=datadef):
         encoding: file encoding.
         datadef: datadef
     Returns:
-        A tuple, (X, Y)
-        - X, list of x, x = [id1, id2]
-        - Y, list of y, y = [tid1, tid2]
+        A list, [(x1, y1), ...]
+        - (x1, y1) one pair for x and y
     '''
-    X = []
-    Y = []
+    develop_data = []
     dev_sample_ge = _read_annotated_text_sample_generator(dev_fpath, encoding)
     for word_list, tag_list in dev_sample_ge:
         x, y = annotated_text_sample2id_sample(word_list, tag_list, datadef)
-        X.append(x)
-        Y.append(y)
-    return (X, Y)
+        develop_data.append((x, y))
+    return develop_data
 
 def get_test_data(test_fpath, encoding="utf-8", datadef=datadef):
     '''
@@ -300,6 +298,36 @@ def get_test_data(test_fpath, encoding="utf-8", datadef=datadef):
     return X
 
 ################
+# utils
+################
+
+def get_annotated_max_len_in_global(data):
+    '''
+    get the annotated data max length
+    Args: 
+        data: annotated data, with format [(x1, y1), ...]
+    Returns:
+        int, max length of the global data
+    '''
+    max_len = 0
+    for x, y in data:
+        max_len = max(len(x), max_len)
+    return max_len
+
+def get_unannotated_max_len_in_global(data):
+    '''
+    get the unannotated data max length
+    Args:
+        data: unannotated data, with format [x1, x2, ...]
+    Returns:
+        int, max length of the global data
+    '''
+    max_len = 0
+    for x in data:
+        max_len = max(len(x), max_len)
+    return max_len
+
+################
 # save & load data definition
 ################
 
@@ -313,7 +341,7 @@ def save(f, datadef=datadef):
     if isinstance(f, file):
         pickle.dump(datadef, f)
     else:
-        with open(f, "wb") as of:
+        with io.open(f, "wb") as of:
             pickle.dump(datadef, of)
 
 def load(f, use_default=True):
@@ -331,7 +359,7 @@ def load(f, use_default=True):
     if isinstance(f, file):
         local_datadef = pickle.load(f)
     else:
-        with open(f) as pf:
+        with io.open(f, "rb") as pf:
             local_datadef = pickle.load(pf)
     if use_default:
         datadef = local_datadef

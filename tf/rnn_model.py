@@ -19,7 +19,6 @@ class ModelParam(object):
             rnn_h_dim_list=[5,],
             rnn_dropout_rate_list=[0.,],
             rnn_type="rnn",
-            learning_rate=0.1,
             **kwargs):
         self.rng_seed = rng_seed
         self.word_num = word_num
@@ -32,7 +31,6 @@ class ModelParam(object):
         self.rnn_h_dim_list = rnn_h_dim_list
         self.rnn_dropout_rate_list=rnn_dropout_rate_list
         self.rnn_type = rnn_type
-        self.learning_rate = learning_rate
 
 
 class RNNModel(object):
